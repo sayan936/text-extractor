@@ -1,0 +1,46 @@
+name: Deploy to Cloud Run
+
+on:
+   push:
+     branches: [main]
+
+env:
+   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+   REGION: us-central1
+   SERVICE_NAME: doc-qa-app
+   REPOSITORY: doc-qa-repo
+
+jobs:
+   deploy:
+     runs-on: ubuntu-latest
+     permissions:
+       contents: read
+       id-token: write
+
+     steps:
+       - uses: actions/checkout@v4
+
+       - name: Google Auth
+         uses: google-github-actions/auth@v2
+         with:
+           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+       - uses: google-github-actions/setup-gcloud@v2
+
+       - name: Configure Docker
+         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+       - name: Build and Push
+         run: |
+           docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }} ./app
+           docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+
+       - name: Deploy to Cloud Run
+         uses: google-github-actions/deploy-cloudrun@v2
+         with:
+           service: ${{ env.SERVICE_NAME }}
+           region: ${{ env.REGION }}
+           image: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.SERVICE_NAME }}:${{ github.sha }}
+           flags: --memory=2Gi --cpu=2 --min-instances=0 --max-instances=10
+           secrets: HF_TOKEN=hf-token:latest
